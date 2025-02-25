@@ -1,0 +1,912 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Data Visualization Project</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+
+        h1 {
+            text-align: center;
+        }
+
+        .chart-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .bar-smoking {
+            fill: #800000;
+        }
+
+        .bar-elderly {
+            fill: #008080;
+        }
+
+        .bar-smoking,
+        .bar-elderly {
+            cursor: pointer;
+            /* Change cursor to pointer */
+            transition: filter 0.2s;
+            /* Smooth transition for hover effect */
+        }
+
+        .bar-smoking:hover,
+        .bar-elderly:hover {
+            filter: drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.5));
+            /* Add a shadow on hover */
+        }
+
+        .selected-bar {
+            filter: drop-shadow(2px 2px 4px rgba(0, 0, 0, 0.5));
+            /* Add a shadow for selected bars */
+        }
+
+        .axis-label {
+            font-size: 14px;
+            font-weight: bold;
+        }
+
+        .bar:hover {
+            opacity: 0.7;
+        }
+
+        .scrubber-container {
+            margin-top: 20px;
+        }
+
+        .scrubber-bar {
+            fill: lightgray;
+            cursor: pointer;
+
+        }
+
+        .scrubber-bar:active {
+            cursor: grabbing;
+        }
+
+        .scrubber-highlight {
+            fill: rgba(0, 0, 0, 0.3);
+            width: 195px;
+        }
+
+        .scrubber-label {
+            fill: black;
+            cursor: pointer;
+        }
+
+        .charts-wrapper {
+            display: flex;
+            justify-content: center;
+            align-items: start;
+            /*gap: 20px;
+            height: 500px;
+            /* Space between bar chart and scatter plot */
+        }
+
+        .scrubber-container {
+            display: flex;
+            justify-content: center;
+            margin-top: 20px;
+        }
+
+        .selected-bar {
+            stroke: black;
+            stroke-width: 2px;
+
+        }
+
+        #scatter-legend {
+            margin-top: 20px;
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+        }
+
+        .legend-text {
+            font-size: 14px;
+        }
+
+        .choropleth-map {
+            /*width: 250px;
+            height: auto;
+            border: 1px solid #ccc;
+            margin-bottom: 10px;*/
+            height: 260px;
+            padding-left: 20px;
+            padding-right: 20px;
+
+        }
+
+        .choropleth-title {
+            text-align: center;
+            font-size: 14px;
+            font-weight: bold;
+            width: 100%;
+        }
+
+        .choropleth-container {
+            width: 700px;
+            height: 700px;
+        }
+
+        #scatter-group {
+            width: 400;
+            height: 400;
+        }
+
+        #choropleth-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+            margin-top: 20px;
+            justify-content: center;
+        }
+
+        #no-maps-message {
+            font-size: 14px;
+            color: #666;
+            margin-top: 60px;
+            text-align: center;
+            font-style: italic;
+            height: 300px;
+            padding-top: 150px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Comparison of Smoking and Elderly Population by State</h1>
+    <div class="charts-wrapper">
+        <svg id="barchart" width="1000" height="350"></svg>
+
+        <svg id="scatterplot" width="400" height="400"></svg>
+        <div id="scatter-legend"></div>
+
+
+    </div>
+    <div class="scrubber-container">
+        <svg id="scrubber-chart" width="1000" height="50"></svg>
+    </div>
+    <div id="no-maps-message" style="text-align: center; margin-top: 10px; display: none;">
+        Click up to 3 bars above to see state breakdowns
+    </div>
+    <div id="choropleth-container" style="display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px;"></div>
+
+
+
+    <script>
+        let stateData = [];
+        let visibleStates = 10;
+        let startIndex = 0;
+        let dragMode = false;
+        let colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+
+        const noMapsMessage = d3.select("#no-maps-message");
+        // Show the message if no states are selected
+        noMapsMessage.style("display", "block");
+
+        // Create a tooltip div
+        const tooltip = d3.select("body").append("div")
+            .style("position", "absolute")
+            .style("background", "rgba(0, 0, 0, 0.8)")
+            .style("color", "#fff")
+            .style("padding", "5px 10px")
+            .style("border-radius", "5px")
+            .style("font-size", "12px")
+            .style("display", "none")
+            .style("pointer-events", "none");
+
+
+        d3.csv("averages.csv").then(function (data) {
+            stateData = data.map(d => ({
+                state: d.state,
+                percent_smoking: +d.percent_smoking,
+                elderly_percentage: +d.elderly_percentage,
+                fullname: d.fullname
+            }));
+
+            updateBarChart(startIndex);
+            updateScrubber();
+        });
+
+
+
+        function updateScrubber() {
+            const svg = d3.select("#scrubber-chart");
+            svg.selectAll("*").remove();
+
+            const scrubberWidth = 1000;
+            const scrubberHeight = 50;
+            const x = d3.scaleBand()
+                .domain(stateData.map(d => d.state))
+                .range([0, scrubberWidth])
+                .padding(0.1);
+
+            const scrubberGroup = svg.append("g");
+
+            scrubberGroup.selectAll("rect")
+                .data(stateData)
+                .enter().append("rect")
+                .attr("x", d => x(d.state))
+                .attr("y", 10)
+                .attr("width", x.bandwidth())
+                .attr("height", 30)
+                .attr("class", "scrubber-bar")
+                .attr("fill", d => (d.percent_smoking > d.elderly_percentage ? "steelblue" : "orange"));
+
+            scrubberGroup.selectAll("text")
+                .data(stateData)
+                .enter().append("text")
+                .attr("x", d => x(d.state) + x.bandwidth() / 2)
+                .attr("y", 28)
+                .attr("class", "scrubber-label")
+                .attr("fill", "white")
+                .style("font-size", "10px")
+                .style("text-anchor", "middle")
+                .text(d => d.state.substring(0, 3));
+
+            let highlight = scrubberGroup.append("rect")
+                .attr("x", x(stateData[startIndex].state))
+                .attr("y", 5)
+                .attr("width", x.bandwidth() * visibleStates)
+                .attr("height", 40)
+                .attr("class", "scrubber-highlight");
+
+            function scrubTo(newIndex) {
+                startIndex = Math.max(0, Math.min(newIndex, stateData.length - visibleStates));
+                d3.select(".scrubber-highlight")
+                    .transition().duration(500)
+                    .attr("x", x(stateData[startIndex].state));
+
+                // Reset selected states when scrubbing
+                selectedStates = []; // Clear the selected states
+                updateBarChart(startIndex); // Update the bar chart to reflect the new visible states
+
+                // Extract the new set of visible states
+                const visibleStatesSet = new Set(stateData.slice(startIndex, startIndex + visibleStates).map(d => d.state));
+
+                // Update the scatter plot to show all counties for the visible states
+                updateScatterplot(visibleStatesSet);
+            }
+
+
+            svg.on("click", function (event) {
+                const [mouseX] = d3.pointer(event);
+                const newIndex = Math.floor(mouseX / (scrubberWidth / stateData.length));
+                scrubTo(newIndex);
+            });
+        }
+
+
+        // Create tooltip div
+        // Tooltip is already defined earlier, no need to redefine it here
+
+        let selectedStates = []; // Array to store selected states
+
+        function updateBarChart(start, customData = null) {
+            startIndex = start;
+            const svg = d3.select("#barchart");
+
+            const margin = { top: 20, right: 120, bottom: 150, left: 80 },
+                width = 1000 - margin.left - margin.right,
+                height = 400 - margin.top - margin.bottom;
+
+            let chartGroup = svg.select("g");
+            if (chartGroup.empty()) {
+                chartGroup = svg.append("g")
+                    .attr("transform", `translate(${margin.left},${margin.top})`);
+            }
+
+            const visibleData = customData || stateData.slice(startIndex, startIndex + visibleStates);
+
+            const visibleStatesSet = new Set(visibleData.map(d => d.state));
+
+            //updateScatterplot(visibleStatesSet); //here
+
+            const totalBars = visibleData.length;
+            const barWidth = Math.max(width / Math.max(totalBars, 1), 40);
+
+            const x0 = d3.scaleBand()
+                .domain(visibleData.map(d => d.state))
+                .range([0, width])
+                .padding(0.1);
+
+            const x1 = d3.scaleBand()
+                .domain(["Smoking", "Elderly"])
+                .range([0, x0.bandwidth()])
+                .padding(0.05);
+
+            const y = d3.scaleLinear()
+                .domain([0, 40])
+                .range([height, 0]);
+
+            let states = chartGroup.selectAll(".state-group")
+                .data(visibleData, d => d.state);
+
+            states.exit()
+                .transition().duration(500)
+                .attr("opacity", 0)
+                .remove();
+
+            const newStates = states.enter().append("g")
+                .attr("class", "state-group")
+                .attr("transform", d => `translate(${x0(d.state)}, 0)`);
+
+            newStates.merge(states)
+                .transition().duration(800)
+                .attr("transform", d => `translate(${x0(d.state)}, 0)`);
+
+            let bars = newStates.merge(states)
+                .selectAll("rect")
+                .data(d => [
+                    { key: "Smoking", value: d.percent_smoking, fullname: d.fullname, state: d.state },
+                    { key: "Elderly", value: d.elderly_percentage, fullname: d.fullname, state: d.state }
+                ]);
+
+            bars.enter().append("rect")
+                .attr("x", d => x1(d.key))
+                .attr("width", x1.bandwidth())
+                .attr("y", height)
+                .attr("height", 0)
+                .attr("class", d => d.key === "Smoking" ? "bar-smoking" : "bar-elderly")
+                .merge(bars)
+                .on("mouseover", function (event, d) {
+                    tooltip.style("display", "block")
+                        .html(`<strong>${d.fullname.replace(/^"|"$/g, '')}</strong><br>${d.key}: ${d.value}%`);
+                })
+                .on("mouseover", function (event, d) {
+                    const stateGroup = d3.select(this.parentNode);
+                    stateGroup.selectAll("rect")
+                        .classed("hovered-bar", true);
+                })
+                .on("mouseout", function (event, d) {
+                    const stateGroup = d3.select(this.parentNode);
+                    if (!selectedStates.includes(d.state)) {
+                        stateGroup.selectAll("rect")
+                            .classed("hovered-bar", false);
+                    }
+                })
+                .on("mousemove", function (event) {
+                    tooltip.style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 20) + "px");
+                })
+                .on("mouseleave", function () {
+                    tooltip.style("display", "none");
+                })
+                .on("click", function (event, d) {
+                    const state = d.state;
+                    if (selectedStates.includes(state)) {
+                        selectedStates = selectedStates.filter(s => s !== state); // Deselect if already selected
+                    } else {
+                        if (selectedStates.length >= 3) {
+                            selectedStates.shift(); // Remove the first selected state if more than 3 are selected
+                        }
+                        selectedStates.push(state); // Add the new state to the selection
+                    }
+                    updateBarChart(startIndex); // Update the bar chart to reflect selection
+                    updateScatterplot(visibleStatesSet); // Update the scatter plot based on selected states
+                })
+                .transition().duration(800)
+                .attr("x", d => x1(d.key))
+                .attr("y", d => y(d.value))
+                .attr("height", d => height - y(d.value))
+                .attr("class", d => {
+                    const baseClass = d.key === "Smoking" ? "bar-smoking" : "bar-elderly";
+                    return selectedStates.includes(d.state) ? `${baseClass} selected-bar` : baseClass;
+                });
+
+            bars.exit()
+                .transition().duration(500)
+                .attr("height", 0)
+                .remove();
+
+            chartGroup.selectAll(".x-axis").remove();
+            chartGroup.selectAll(".y-axis").remove();
+            chartGroup.selectAll(".x-label").remove();
+            chartGroup.selectAll(".y-label").remove();
+            chartGroup.selectAll(".legend").remove();
+
+            chartGroup.append("g")
+                .attr("class", "x-axis")
+                .attr("transform", `translate(0,${height})`)
+                .call(d3.axisBottom(x0).tickFormat(d => {
+                    const matchingState = stateData.find(s => s.state === d);
+                    return matchingState ? matchingState.fullname : d;
+                }))
+                .selectAll("text")
+                .attr("transform", "rotate(-45)")
+                .style("text-anchor", "end")
+                .style("font-size", "12px");
+
+            chartGroup.append("text")
+                .attr("class", "x-label")
+                .attr("x", width / 2)
+                .attr("y", height + 100)
+                .style("text-anchor", "middle")
+                .style("font-size", "14px")
+                .text("State");
+
+            chartGroup.append("g")
+                .attr("class", "y-axis")
+                .call(d3.axisLeft(y));
+
+            chartGroup.append("text")
+                .attr("class", "y-label")
+                .attr("transform", "rotate(-90)")
+                .attr("x", -height / 2)
+                .attr("y", -50)
+                .style("text-anchor", "middle")
+                .style("font-size", "14px")
+                .text("Percentage (%)");
+
+            const legend = chartGroup.append("g")
+                .attr("class", "legend")
+                .attr("transform", `translate(${width + 20}, 50)`);
+
+            const legendData = [
+                { label: "Smoking", color: "#800000" },
+                { label: "Elderly", color: "#008080" }
+            ];
+
+            legend.selectAll("rect")
+                .data(legendData)
+                .enter().append("rect")
+                .attr("x", 0)
+                .attr("y", (d, i) => i * 25)
+                .attr("width", 20)
+                .attr("height", 20)
+                .attr("fill", d => d.color);
+
+            legend.selectAll("text")
+                .data(legendData)
+                .enter().append("text")
+                .attr("x", 30)
+                .attr("y", (d, i) => i * 25 + 15)
+                .style("font-size", "14px")
+                .text(d => d.label);
+        }
+
+        function updateScatterplot(visibleStatesSet) {
+            d3.csv("national.csv").then(function (countyData) {
+                countyData.forEach(d => {
+                    d.percent_smoking = +d.percent_smoking;
+                    d.elderly_percentage = +d.elderly_percentage;
+                });
+
+                // Filter county data to only include counties in visible states
+                let filteredCountyData = countyData.filter(d => visibleStatesSet.has(d.short_name));
+
+                // Further filter by selected states if any are selected
+                if (selectedStates.length > 0) {
+                    filteredCountyData = filteredCountyData.filter(d => selectedStates.includes(d.short_name));
+                }
+
+                const scatterSvg = d3.select("#scatterplot");
+                scatterSvg.selectAll("*").remove();
+
+                const scatterMargin = { top: 20, right: 20, bottom: 50, left: 60 },
+                    scatterWidth = 400 - scatterMargin.left - scatterMargin.right,
+                    scatterHeight = 400 - scatterMargin.top - scatterMargin.bottom;
+
+                const scatterGroup = scatterSvg.append("g")
+                    .attr("transform", `translate(${scatterMargin.left},${scatterMargin.top})`);
+
+                const maxValue = Math.max(
+                    d3.max(filteredCountyData, d => d.percent_smoking),
+                    d3.max(filteredCountyData, d => d.elderly_percentage)
+                );
+
+                const scatterX = d3.scaleLinear()
+                    .domain([0, maxValue])
+                    .range([0, scatterWidth]);
+
+                const scatterY = d3.scaleLinear()
+                    .domain([0, maxValue])
+                    .range([scatterHeight, 0]);
+
+                scatterGroup.append("g")
+                    .attr("transform", `translate(0,${scatterHeight})`)
+                    .call(d3.axisBottom(scatterX));
+
+                scatterGroup.append("g")
+                    .call(d3.axisLeft(scatterY));
+
+                scatterGroup.append("text")
+                    .attr("x", scatterWidth / 2)
+                    .attr("y", scatterHeight + 40)
+                    .style("text-anchor", "middle")
+                    .style("font-size", "14px")
+                    .text("Percent Smoking");
+
+                scatterGroup.append("text")
+                    .attr("transform", "rotate(-90)")
+                    .attr("x", -scatterHeight / 2)
+                    .attr("y", -50)
+                    .style("text-anchor", "middle")
+                    .style("font-size", "14px")
+                    .text("Percent Elderly");
+
+
+                scatterGroup.selectAll("circle")
+                    .data(filteredCountyData)
+                    .enter().append("circle")
+                    .attr("cx", d => scatterX(d.percent_smoking))
+                    .attr("cy", d => scatterY(d.elderly_percentage))
+                    .attr("r", 4)
+                    .attr("fill", d => selectedStates.length > 0 ? colorScale(selectedStates.indexOf(d.short_name)) : "steelblue")
+                    .attr("opacity", 0.6);
+
+                const tooltip = d3.select("body").append("div")
+                    .style("position", "absolute")
+                    .style("background", "rgba(0,0,0,0.7)")
+                    .style("color", "#fff")
+                    .style("padding", "5px 10px")
+                    .style("border-radius", "5px")
+                    .style("font-size", "12px")
+                    .style("display", "none")
+                    .style("pointer-events", "none");
+
+                scatterGroup.selectAll("circle")
+                    .on("mouseover", function (event, d) {
+                        tooltip.style("display", "block")
+                            .html(`${d.display_name}<br>Smoking: ${d.percent_smoking}%<br>Elderly: ${d.elderly_percentage}%`);
+                    })
+                    .on("mousemove", function (event) {
+                        tooltip.style("left", (event.pageX + 10) + "px")
+                            .style("top", (event.pageY - 20) + "px");
+                    })
+                    .on("mouseleave", function () {
+                        tooltip.style("display", "none");
+                    });
+
+                // Update the legend
+                const legendContainer = d3.select("#scatter-legend");
+                legendContainer.selectAll("*").remove(); // Clear existing legend
+
+                if (selectedStates.length > 0) {
+                    const legendItems = legendContainer.selectAll(".legend-item")
+                        .data(selectedStates)
+                        .enter().append("div")
+                        .attr("class", "legend-item");
+
+                    legendItems.append("div")
+                        .attr("class", "legend-color")
+                        .style("background-color", (d, i) => colorScale(i));
+
+                    legendItems.append("div")
+                        .attr("class", "legend-text")
+                        .text(d => d);
+                }
+
+                updateChoroplethMaps(selectedStates);
+            });
+        }
+
+        function updateChoroplethMaps(selectedStates) {
+            console.log("Called Update Choropleth Maps for states: ", selectedStates);
+            const choroplethContainer = d3.select("#choropleth-container");
+            choroplethContainer.selectAll("*").remove(); // Clear existing maps
+
+            const noMapsMessage = d3.select("#no-maps-message");
+
+            if (selectedStates.length === 0) {
+                // Show the message if no states are selected
+                noMapsMessage.style("display", "block");
+            } else {
+                // Hide the message if states are selected
+                noMapsMessage.style("display", "none");
+
+                d3.csv("national.csv").then(function (countyData) {
+                    countyData.forEach(d => {
+                        d.percent_smoking = +d.percent_smoking;
+                        d.elderly_percentage = +d.elderly_percentage;
+                    });
+
+                    // Load the GeoJSON data for the counties
+                    d3.json("us-counties.json").then(function (geojson) {
+
+
+                        selectedStates.forEach((state, index) => {
+                            // Filter county data for the current state
+                            const stateCountyData = countyData.filter(d => d.short_name === state);
+
+                            // Filter GeoJSON for the current state
+                            const stateGeoJson = geojson.features.filter(f => {
+                                const stateFips = f.properties.STATEFP.substring(0, 2); // Extract state FIPS code
+                                return stateFips === getStateFips(state); // Map state name to FIPS code
+                            });
+
+                            // Create a container for the two maps (smoking and elderly)
+                            const mapContainer = choroplethContainer.append("div")
+                                .style("display", "flex")
+                                .style("gap", "20px");
+
+                            // Create the smoking choropleth map
+                            createChoroplethMap(mapContainer, stateCountyData, stateGeoJson, "percent_smoking", `Smoking Percentage in ${state}`, colorScale(index));
+
+                            // Create the elderly choropleth map
+                            createChoroplethMap(mapContainer, stateCountyData, stateGeoJson, "elderly_percentage", `Elderly Percentage in ${state}`, colorScale(index));
+                        });
+                    });
+                });
+            }
+        }
+
+        function getStateFips(stateAbbreviation) {
+            const stateAbbreviationToFips = {
+                "AL": "01", // Alabama
+                "AK": "02", // Alaska
+                "AZ": "04", // Arizona
+                "AR": "05", // Arkansas
+                "CA": "06", // California
+                "CO": "08", // Colorado
+                "CT": "09", // Connecticut
+                "DE": "10", // Delaware
+                "DC": "11", // District of Columbia
+                "FL": "12", // Florida
+                "GA": "13", // Georgia
+                "HI": "15", // Hawaii
+                "ID": "16", // Idaho
+                "IL": "17", // Illinois
+                "IN": "18", // Indiana
+                "IA": "19", // Iowa
+                "KS": "20", // Kansas
+                "KY": "21", // Kentucky
+                "LA": "22", // Louisiana
+                "ME": "23", // Maine
+                "MD": "24", // Maryland
+                "MA": "25", // Massachusetts
+                "MI": "26", // Michigan
+                "MN": "27", // Minnesota
+                "MS": "28", // Mississippi
+                "MO": "29", // Missouri
+                "MT": "30", // Montana
+                "NE": "31", // Nebraska
+                "NV": "32", // Nevada
+                "NH": "33", // New Hampshire
+                "NJ": "34", // New Jersey
+                "NM": "35", // New Mexico
+                "NY": "36", // New York
+                "NC": "37", // North Carolina
+                "ND": "38", // North Dakota
+                "OH": "39", // Ohio
+                "OK": "40", // Oklahoma
+                "OR": "41", // Oregon
+                "PA": "42", // Pennsylvania
+                "RI": "44", // Rhode Island
+                "SC": "45", // South Carolina
+                "SD": "46", // South Dakota
+                "TN": "47", // Tennessee
+                "TX": "48", // Texas
+                "UT": "49", // Utah
+                "VT": "50", // Vermont
+                "VA": "51", // Virginia
+                "WA": "53", // Washington
+                "WV": "54", // West Virginia
+                "WI": "55", // Wisconsin
+                "WY": "56"  // Wyoming
+            };
+
+            return stateAbbreviationToFips[stateAbbreviation];
+        }
+
+        function removeLeadingZeros(str) {
+            return str.replace(/^0+/, '');
+        }
+
+        function createChoroplethMap(container, countyData, geojson, dataKey, title, color) {
+            const mapWidth = 200;
+            const mapHeight = 200;
+            const titleHeight = 30;
+            const totalHeight = mapHeight + titleHeight;
+
+            const svg = container.append("svg")
+                .attr("width", mapWidth)
+                .attr("height", totalHeight)
+                .attr("class", "choropleth-map");
+
+            // Add title
+            svg.append("text")
+                .attr("x", mapWidth / 2)
+                .attr("y", titleHeight / 2) // Increased from 20 to 30 to add more space
+                .attr("dy", "0.35em")
+                .attr("class", "choropleth-title")
+                .style("text-anchor", "middle")
+                .style("font-size", "14px")
+                .style("font-weight", "bold")
+                .text(title);
+
+            // Create a projection for the map
+            const projection = d3.geoAlbersUsa()
+                .fitSize([mapWidth, mapHeight], { type: "FeatureCollection", features: geojson });
+
+            const path = d3.geoPath().projection(projection);
+
+            // Create a color scale
+            const colorScale = d3.scaleLinear()
+                .domain([0, d3.max(countyData, d => d[dataKey])])
+                .range(["white", color]);
+
+            // Draw the counties
+            //svg.selectAll("path")
+            svg.append("g")
+                .attr("transform", `translate(0, ${titleHeight})`) // Shift the map down to make space for the title
+                .selectAll("path")
+                .data(geojson)
+                .enter().append("path")
+                .attr("d", path)
+                .attr("fill", d => {
+                    const county = countyData.find(c => c.cnty_fips === removeLeadingZeros(d.properties.GEOID));
+                    return county ? colorScale(county[dataKey]) : "#ccc"; // Default color for missing data
+                })
+                .attr("stroke", "#333")
+                .attr("stroke-width", 0.5)
+                .on("mouseover", function (event, d) {
+                    // Find the corresponding county data
+                    const county = countyData.find(c => c.cnty_fips === removeLeadingZeros(d.properties.GEOID));
+                    if (county) {
+                        // Show the tooltip
+                        tooltip.style("display", "block")
+                            .html(`${county.display_name.replace(/^"|"$/g, '')}<br>${title}: ${county[dataKey]}%`);
+                    }
+                })
+                .on("mousemove", function (event) {
+                    // Move the tooltip with the mouse
+                    tooltip.style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 20) + "px");
+                })
+                .on("mouseleave", function () {
+                    // Hide the tooltip
+                    tooltip.style("display", "none");
+                });
+
+            // Add a legend
+            const legend = svg.append("g")
+                .attr("transform", `translate(${mapWidth - 100}, ${mapHeight + titleHeight - 0})`);
+
+            const legendScale = d3.scaleLinear()
+                .domain([0, d3.max(countyData, d => d[dataKey])])
+                .range([0, 80]);
+
+            legend.selectAll("rect")
+                .data(d3.range(0, d3.max(countyData, d => d[dataKey]), d3.max(countyData, d => d[dataKey]) / 5))
+                .enter().append("rect")
+                .attr("x", (d, i) => i * 16)
+                .attr("y", 0)
+                .attr("width", 16)
+                .attr("height", 10)
+                .attr("fill", d => colorScale(d));
+
+            legend.append("text")
+                .attr("x", 0)
+                .attr("y", 25)
+                .style("font-size", "10px")
+                .text("0");
+
+            legend.append("text")
+                .attr("x", 80)
+                .attr("y", 25)
+                .style("font-size", "10px")
+                .text(d3.max(countyData, d => d[dataKey]).toFixed(1));
+        }
+
+
+        // Scatterplot remains unchanged
+        d3.csv("national.csv").then(function (countyData) {
+
+            console.log(countyData);
+            // Convert data to numbers
+            countyData.forEach(d => {
+                d.percent_smoking = +d.percent_smoking;
+                d.elderly_percentage = +d.elderly_percentage;
+            });
+
+            // Define SVG dimensions
+            const scatterMargin = { top: 20, right: 20, bottom: 50, left: 60 },
+                scatterWidth = 400 - scatterMargin.left - scatterMargin.right,
+                scatterHeight = 400 - scatterMargin.top - scatterMargin.bottom;
+
+            // Select the scatterplot SVG and append a group for the plot
+            const scatterSvg = d3.select("#scatterplot");
+            scatterSvg.selectAll("*").remove(); // Clear existing content if reloading
+
+            const scatterGroup = scatterSvg.append("g")
+                .attr("id", "scatter-group")
+                .attr("transform", `translate(${scatterMargin.left},${scatterMargin.top})`);
+
+            // Define scales
+            const scatterX = d3.scaleLinear()
+                .domain([d3.min(countyData, d => d.percent_smoking) - 1, d3.max(countyData, d => d.percent_smoking) + 1])
+                .range([0, scatterWidth]);
+
+            const scatterY = d3.scaleLinear()
+                .domain([d3.min(countyData, d => d.elderly_percentage) - 1, d3.max(countyData, d => d.elderly_percentage) + 1])
+                .range([scatterHeight, 0]);
+
+            // Add axes
+            scatterGroup.append("g")
+                .attr("transform", `translate(0,${scatterHeight})`)
+                .call(d3.axisBottom(scatterX));
+
+            scatterGroup.append("g")
+                .call(d3.axisLeft(scatterY));
+
+            // Axis labels
+            scatterGroup.append("text")
+                .attr("x", scatterWidth / 2)
+                .attr("y", scatterHeight + 40)
+                .style("text-anchor", "middle")
+                .style("font-size", "14px")
+                .text("Percent Smoking");
+
+            scatterGroup.append("text")
+                .attr("transform", "rotate(-90)")
+                .attr("x", -scatterHeight / 2)
+                .attr("y", -50)
+                .style("text-anchor", "middle")
+                .style("font-size", "14px")
+                .text("Percent Elderly");
+
+            // Draw circles for data points
+            scatterGroup.selectAll("circle")
+                .data(countyData)
+                .enter().append("circle")
+                .attr("cx", d => scatterX(d.percent_smoking))
+                .attr("cy", d => scatterY(d.elderly_percentage))
+                .attr("r", 4)
+                .attr("fill", "steelblue")
+                .attr("opacity", 0.6);
+
+            // Tooltip
+            const tooltip = d3.select("body").append("div")
+                .style("position", "absolute")
+                .style("background", "rgba(0,0,0,0.7)")
+                .style("color", "#fff")
+                .style("padding", "5px 10px")
+                .style("border-radius", "5px")
+                .style("font-size", "12px")
+                .style("display", "none")
+                .style("pointer-events", "none");
+
+            function removeQuotes(str) {
+                return str.replace(/['"]/g, '');
+            }
+
+            scatterGroup.selectAll("circle")
+                .on("mouseover", function (event, d) {
+                    tooltip.style("display", "block")
+                        .html(`${removeQuotes(d.display_name)}<br>Smoking: ${d.percent_smoking}%<br>Elderly: ${d.elderly_percentage}%`);
+                })
+                .on("mousemove", function (event) {
+                    tooltip.style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 20) + "px");
+                })
+                .on("mouseleave", function () {
+                    tooltip.style("display", "none");
+                });
+        });
+
+
+    </script>
+</body>
+
+</html>
