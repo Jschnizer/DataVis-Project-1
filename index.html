@@ -97,7 +97,7 @@
         }
 
         .selected-bar {
-            stroke: black;
+            stroke: goldenrod;
             stroke-width: 2px;
 
         }
@@ -187,7 +187,8 @@
         <svg id="scrubber-chart" width="1000" height="50"></svg>
     </div>
     <div id="no-maps-message" style="text-align: center; margin-top: 10px; display: none;">
-        Click up to 3 bars above to see state breakdowns
+        Click up to 3 bars above to see state breakdowns <br>
+        Click again to deselect
     </div>
     <div id="choropleth-container" style="display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px;"></div>
 
@@ -372,12 +373,11 @@
                 .on("mouseover", function (event, d) {
                     tooltip.style("display", "block")
                         .html(`<strong>${d.fullname.replace(/^"|"$/g, '')}</strong><br>${d.key}: ${d.value}%`);
-                })
-                .on("mouseover", function (event, d) {
                     const stateGroup = d3.select(this.parentNode);
                     stateGroup.selectAll("rect")
                         .classed("hovered-bar", true);
                 })
+
                 .on("mouseout", function (event, d) {
                     const stateGroup = d3.select(this.parentNode);
                     if (!selectedStates.includes(d.state)) {
@@ -568,7 +568,7 @@
                 scatterGroup.selectAll("circle")
                     .on("mouseover", function (event, d) {
                         tooltip.style("display", "block")
-                            .html(`${d.display_name}<br>Smoking: ${d.percent_smoking}%<br>Elderly: ${d.elderly_percentage}%`);
+                            .html(`${d.display_name.replace(/^"|"$/g, '')}<br>Smoking: ${d.percent_smoking}%<br>Elderly: ${d.elderly_percentage}%`);
                     })
                     .on("mousemove", function (event) {
                         tooltip.style("left", (event.pageX + 10) + "px")
